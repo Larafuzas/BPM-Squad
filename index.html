@@ -20,6 +20,7 @@
             --text-muted: #a4b0be;
             --accent: #007bff;
             --danger: #dc3545;
+            --warning: #f39c12;
         }
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
@@ -30,7 +31,7 @@
         
         /* Controles Globales */
         .header-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .btn-add { background-color: #f39c12; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px;}
+        .btn-add { background-color: var(--warning); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px;}
         .btn-add:hover { background-color: #e67e22; }
 
         /* Pestañas */
@@ -208,17 +209,26 @@
             sensorCount++;
         }
 
-        // --- LÓGICA BLUETOOTH ---
+        // --- LÓGICA BLUETOOTH CON RECONEXIÓN ---
         async function connectSensor(index) {
             try {
-                const device = await navigator.bluetooth.requestDevice({ 
-                    filters: [{ services: ['heart_rate'] }],
-                    optionalServices: ['battery_service']
-                });
+                let device;
+                // Si el dispositivo ya existe (se desconectó y estamos reconectando)
+                if (activeDevices[index] && activeDevices[index].device) {
+                    device = activeDevices[index].device;
+                } else {
+                    // Si es nuevo, pedimos permisos al usuario
+                    device = await navigator.bluetooth.requestDevice({ 
+                        filters: [{ services: ['heart_rate'] }],
+                        optionalServices: ['battery_service']
+                    });
+                    
+                    // Añadir detector de pérdida de señal
+                    device.addEventListener('gattserverdisconnected', () => handleDisconnection(index));
+                }
                 
                 const server = await device.gatt.connect();
                 
-                // Mostrar nombre interno del hardware
                 document.getElementById(`internal-${index}`).innerText = `HW: ${device.name || 'Genérico'}`;
 
                 const hrService = await server.getPrimaryService('heart_rate');
@@ -245,12 +255,30 @@
                 activeDevices[index] = { device, currentBpm: 0, lastUpdate: Date.now() };
                 
                 const btn = document.getElementById(`btn-${index}`);
-                btn.style.backgroundColor = "#28a745";
+                btn.style.backgroundColor = "#28a745"; // Verde
                 btn.innerText = "Conectado";
 
             } catch (error) {
                 console.error("Error en la conexión:", error);
                 alert("Conexión cancelada o fallida.");
+            }
+        }
+
+        // --- GESTIÓN DE DESCONEXIONES ---
+        function handleDisconnection(index) {
+            if (!config[index] || !config[index].active) return; 
+            
+            console.log(`El sensor ${index} se ha desconectado físicamente.`);
+            
+            const btn = document.getElementById(`btn-${index}`);
+            if (btn) {
+                btn.style.backgroundColor = "var(--warning)"; // Naranja
+                btn.innerText = "Reconectar";
+            }
+            
+            const internalStr = document.getElementById(`internal-${index}`);
+            if (internalStr) {
+                internalStr.innerText = `HW: ${activeDevices[index].device.name || 'Genérico'} (Señal Perdida)`;
             }
         }
 
@@ -343,7 +371,7 @@
             combinedChartObj.update();
             
             // Desconectar Bluetooth si estaba activo
-            if(activeDevices[index] && activeDevices[index].device.gatt.connected) {
+            if(activeDevices[index] && activeDevices[index].device && activeDevices[index].device.gatt.connected) {
                 activeDevices[index].device.gatt.disconnect();
             }
             activeDevices[index] = null;
